@@ -1,0 +1,402 @@
+#include <pic.h>
+#include <string.h>
+#include <stdio.h>
+
+// Configuration settings for the PIC microcontroller
+__CONFIG(FOSC_HS & WDTE_OFF & PWRTE_ON & BOREN_OFF & LVP_OFF);
+
+// Define the crystal frequency
+#define _XTAL_FREQ 20000000
+
+// Define LCD control pins
+#define RS RC0 // pin 15
+#define RW RC1 // pin 16
+#define EN RC2 // pin 17
+
+// Define Ultrasonic sensor pins
+#define TRIG1 RD0 // pin 19
+#define ECHO1 RD1 // pin 20
+#define TRIG2 RD2 // pin 21
+#define ECHO2 RD3 // pin 22
+
+// Define LED pins
+#define LED1 RC4 // LED for water tank 1
+#define LED2 RC5 // LED for water tank 2
+
+// Define minimum and maximum distance limits (in cm) for both tanks
+#define MIN_DISTANCET1 5.0
+#define MAX_DISTANCET1 40.0
+#define MIN_DISTANCET2 5.0
+#define MAX_DISTANCET2 40.0
+
+// Function to send data to the LCD
+void lcd_data(unsigned char data) {
+    PORTB = data; // Data on PORTB (pins 33 to 40)
+    RS = 1; // Select data register
+    RW = 0; // Write operation
+    EN = 1; // Enable LCD
+    __delay_ms(5);
+    EN = 0; // Disable LCD
+}
+
+// Function to send command to the LCD
+void lcd_cmd(unsigned char command) {
+    PORTB = command; // Command on PORTB (pins 33 to 40)
+    RS = 0; // Select command register
+    RW = 0; // Write operation
+    EN = 1; // Enable LCD
+    __delay_ms(5);
+    EN = 0; // Disable LCD
+}
+
+// Function to send a string to the LCD
+void lcd_string(const unsigned char *s, unsigned char length) {
+    unsigned char i;
+    for (i = 0; i < length; i++) {
+        lcd_data(s[i]);
+    }
+}
+
+// Function to initialize the LCD
+void lcd_init() {
+    lcd_cmd(0x38); // 2 lines, 5x7 matrix
+    lcd_cmd(0x06); // Auto-increment cursor
+    lcd_cmd(0x0C); // Display ON, Cursor OFF, Blink OFF
+    lcd_cmd(0x01); // Clear display
+}
+
+// Function to send trigger pulse to ultrasonic sensor
+void send_trigger_pulse(unsigned char sensor) {
+    if (sensor == 1) {
+        TRIG1 = 1;
+        __delay_us(10); // 10us pulse
+        TRIG1 = 0;
+    } else {
+        TRIG2 = 1;
+        __delay_us(10); // 10us pulse
+        TRIG2 = 0;
+    }
+}
+
+// Function to measure echo pulse duration
+unsigned int measure_echo_time(unsigned char sensor) {
+    unsigned int time = 0;
+    if (sensor == 1) {
+        while (!ECHO1); // Wait for echo to start
+        while (ECHO1) {
+            time++;
+            __delay_us(1); // Increment time until echo ends
+        }
+    } else {
+        while (!ECHO2); // Wait for echo to start
+        while (ECHO2) {
+            time++;
+            __delay_us(1);
+        }
+    }
+    return time;
+}
+
+// Function to calculate distance from echo time
+float calculate_distance_cm(unsigned int echo_time) {
+    return (echo_time * 0.0343) / 2; // Convert time to distance in cm
+}
+
+// Function to display distance and control LEDs on LCD
+void display_distance_and_control(float distance, unsigned char tank) {
+    char buffer[16];
+
+    // Display distance for the respective tank
+    if (tank == 1) {
+        lcd_cmd(0x80); // Set cursor to the first row
+        sprintf(buffer, "Water Tank 1: %.2f cm", distance);
+        lcd_string(buffer, strlen(buffer));
+
+        // Control LEDs for tank 1 based on distance
+        if (distance < MIN_DISTANCET1) {
+            LED1 = 0; // Turn off LED for tank 1 (underflow)
+        } else if (distance > MAX_DISTANCET1) {
+            LED1 = 1; // Turn on LED for tank 1 (overflow)
+        } else {
+            LED1 = 0; // Turn off LED for tank 1 (within range)
+        }
+
+    } else {
+        lcd_cmd(0xC0); // Set cursor to the second row
+        sprintf(buffer, "Water Tank 2: %.2f cm", distance);
+        lcd_string(buffer, strlen(buffer));
+
+        // Control LEDs for tank 2 based on distance
+        if (distance < MIN_DISTANCET2) {
+            LED2 = 0; // Turn off LED for tank 2 (underflow)
+        } else if (distance > MAX_DISTANCET2) {
+            LED2 = 1; // Turn on LED for tank 2 (overflow)
+        } else {
+            LED2 = 0; // Turn off LED for tank 2 (within range)
+        }
+    }
+}
+
+// Main function
+void main() {
+    // Set PORTB and PORTC as output for LCD
+    TRISB = 0x00; // LCD data (pins 33 to 40)
+    TRISC = 0x00; // LCD control and LED pins
+
+    // Set TRIG as output and ECHO as input for ultrasonic sensors
+    TRISD0 = 0; // TRIG1 pin as output
+    TRISD1 = 1; // ECHO1 pin as input
+    TRISD2 = 0; // TRIG2 pin as output
+    TRISD3 = 1; // ECHO2 pin as input
+
+    // Set LED pins as output
+    LED1 = 0; // Initialize LED for tank 1 (off)
+    LED2 = 0; // Initialize LED for tank 2 (off)
+
+    lcd_init(); // Initialize the LCD
+
+    while (1) {
+        // Measure distance for sensor 1 (Tank 1)
+        send_trigger_pulse(1);
+        unsigned int echo_time1 = measure_echo_time(1);
+        float distance1 = calculate_distance_cm(echo_time1);
+        display_distance_and_control(distance1, 1); // Display for tank 1
+        __delay_ms(500); // Delay for stability
+
+        // Measure distance for sensor 2 (Tank 2)
+        send_trigger_pulse(2);
+        unsigned int echo_time2 = measure_echo_time(2);
+        float distance2 = calculate_distance_cm(echo_time2);
+        display_distance_and_control(distance2, 2); // Display for tank 2
+        __delay_ms(500); // Delay for stability
+    }
+}
+
+UART CODE:
+#include <pic.h>
+#include <string.h>
+#include <stdio.h>
+
+// Configuration settings for the PIC microcontroller
+__CONFIG(FOSC_HS & WDTE_OFF & PWRTE_ON & BOREN_OFF & LVP_OFF);
+
+// Define the crystal frequency
+#define _XTAL_FREQ 20000000
+
+// Define LCD control pins
+#define RS RC0 // pin 15
+#define RW RC1 // pin 16
+#define EN RC2 // pin 17
+
+// Define Ultrasonic sensor pins
+#define TRIG1 RD0 // pin 19
+#define ECHO1 RD1 // pin 20
+#define TRIG2 RD2 // pin 21
+#define ECHO2 RD3 // pin 22
+
+// Define LED pins
+#define LED1 RC4 // LED for water tank 1
+#define LED2 RC5 // LED for water tank 2
+
+// Define UART TX pin
+#define TX_PIN RC6 // UART TX pin
+
+// Define minimum and maximum distance limits (in cm) for both tanks
+#define MIN_DISTANCET1 5.0
+#define MAX_DISTANCET1 40.0
+#define MIN_DISTANCET2 5.0
+#define MAX_DISTANCET2 40.0
+
+// Function prototypes
+void uart_init(void);
+void uart_send(char data);
+void uart_send_string(const char *str);
+void lcd_data(unsigned char data);
+void lcd_cmd(unsigned char command);
+void lcd_string(const unsigned char *s, unsigned char length);
+void lcd_init(void);
+void send_trigger_pulse(unsigned char sensor);
+unsigned int measure_echo_time(unsigned char sensor);
+float calculate_distance_cm(unsigned int echo_time);
+void display_distance_and_control(float distance, unsigned char tank);
+void send_distance_to_esp(float distance, unsigned char tank);
+
+// Function to initialize UART communication
+void uart_init(void) {
+    TRISC6 = 0; // TX pin set as output
+    SPBRG = 129; // Baud rate 9600 for 20MHz
+    BRGH = 1;    // High baud rate
+    SYNC = 0;    // Asynchronous mode
+    SPEN = 1;    // Enable serial port
+    TXEN = 1;    // Enable transmission
+    TX9 = 0;     // 8-bit transmission
+}
+
+// Function to send a single character via UART
+void uart_send(char data) {
+    while (!TXIF); // Wait for buffer to be empty
+    TXREG = data;  // Transmit data
+}
+
+// Function to send a string via UART
+void uart_send_string(const char *str) {
+    while (*str != '\0') {
+        uart_send(*str);
+        str++;
+    }
+}
+
+// Function to initialize the LCD
+void lcd_init() {
+    lcd_cmd(0x38); // 2 lines, 5x7 matrix
+    lcd_cmd(0x06); // Auto-increment cursor
+    lcd_cmd(0x0C); // Display ON, Cursor OFF, Blink OFF
+    lcd_cmd(0x01); // Clear display
+}
+
+// Function to send data to the LCD
+void lcd_data(unsigned char data) {
+    PORTB = data; // Data on PORTB (pins 33 to 40)
+    RS = 1;       // Select data register
+    RW = 0;       // Write operation
+    EN = 1;       // Enable LCD
+    __delay_ms(5);
+    EN = 0;       // Disable LCD
+}
+
+// Function to send command to the LCD
+void lcd_cmd(unsigned char command) {
+    PORTB = command; // Command on PORTB (pins 33 to 40)
+    RS = 0;          // Select command register
+    RW = 0;          // Write operation
+    EN = 1;          // Enable LCD
+    __delay_ms(5);
+    EN = 0;          // Disable LCD
+}
+
+// Function to send a string to the LCD
+void lcd_string(const unsigned char *s, unsigned char length) {
+    unsigned char i;
+    for (i = 0; i < length; i++) {
+        lcd_data(s[i]);
+    }
+}
+
+// Function to send trigger pulse to ultrasonic sensor
+void send_trigger_pulse(unsigned char sensor) {
+    if (sensor == 1) {
+        TRIG1 = 1;
+        __delay_us(10); // 10us pulse
+        TRIG1 = 0;
+    } else {
+        TRIG2 = 1;
+        __delay_us(10); // 10us pulse
+        TRIG2 = 0;
+    }
+}
+
+// Function to measure echo pulse duration
+unsigned int measure_echo_time(unsigned char sensor) {
+    unsigned int time = 0;
+    if (sensor == 1) {
+        while (!ECHO1); // Wait for echo to start
+        while (ECHO1) {
+            time++;
+            __delay_us(1); // Increment time until echo ends
+        }
+    } else {
+        while (!ECHO2); // Wait for echo to start
+        while (ECHO2) {
+            time++;
+            __delay_us(1);
+        }
+    }
+    return time;
+}
+
+// Function to calculate distance from echo time
+float calculate_distance_cm(unsigned int echo_time) {
+    return (echo_time * 0.0343) / 2; // Convert time to distance in cm
+}
+
+// Function to display distance and control LEDs on LCD
+void display_distance_and_control(float distance, unsigned char tank) {
+    char buffer[16];
+
+    // Display distance for the respective tank
+    if (tank == 1) {
+        lcd_cmd(0x80); // Set cursor to the first row
+        sprintf(buffer, "Water Tank 1: %.2f cm", distance);
+        lcd_string(buffer, strlen(buffer));
+
+        // Control LEDs for tank 1 based on distance
+        if (distance < MIN_DISTANCET1) {
+            LED1 = 0; // Turn off LED for tank 1 (underflow)
+        } else if (distance > MAX_DISTANCET1) {
+            LED1 = 1; // Turn on LED for tank 1 (overflow)
+        } else {
+            LED1 = 0; // Turn off LED for tank 1 (within range)
+        }
+
+    } else {
+        lcd_cmd(0xC0); // Set cursor to the second row
+        sprintf(buffer, "Water Tank 2: %.2f cm", distance);
+        lcd_string(buffer, strlen(buffer));
+
+        // Control LEDs for tank 2 based on distance
+        if (distance < MIN_DISTANCET2) {
+            LED2 = 0; // Turn off LED for tank 2 (underflow)
+        } else if (distance > MAX_DISTANCET2) {
+            LED2 = 1; // Turn on LED for tank 2 (overflow)
+        } else {
+            LED2 = 0; // Turn off LED for tank 2 (within range)
+        }
+    }
+}
+
+// Function to send distance data to ESP8266
+void send_distance_to_esp(float distance, unsigned char tank) {
+    char buffer[16];
+    sprintf(buffer, "Tank %d: %.2f cm", tank, distance);
+    uart_send_string(buffer); // Send distance as string
+    uart_send('\n');          // Send newline character for separation
+}
+
+// Main function
+void main() {
+    // Set PORTB and PORTC as output for LCD and UART
+    TRISB = 0x00; // LCD data (pins 33 to 40)
+    TRISC = 0x00; // LCD control and LED pins
+    uart_init();  // Initialize UART
+
+    // Set TRIG as output and ECHO as input for ultrasonic sensors
+    TRISD0 = 0; // TRIG1 pin as output
+    TRISD1 = 1; // ECHO1 pin as input
+    TRISD2 = 0; // TRIG2 pin as output
+    TRISD3 = 1; // ECHO2 pin as input
+
+    // Set LED pins as output
+    LED1 = 0; // Initialize LED for tank 1 (off)
+    LED2 = 0; // Initialize LED for tank 2 (off)
+
+    lcd_init(); // Initialize the LCD
+
+    while (1) {
+        // Measure distance for sensor 1 (Tank 1)
+        send_trigger_pulse(1);
+        unsigned int echo_time1 = measure_echo_time(1);
+        float distance1 = calculate_distance_cm(echo_time1);
+        display_distance_and_control(distance1, 1); // Display for tank 1
+        send_distance_to_esp(distance1, 1);         // Send to ESP8266
+        __delay_ms(500); // Delay for stability
+
+        // Measure distance for sensor 2 (Tank 2)
+        send_trigger_pulse(2);
+        unsigned int echo_time2 = measure_echo_time(2);
+        float distance2 = calculate_distance_cm(echo_time2);
+        display_distance_and_control(distance2, 2); // Display for tank 2
+        send_distance_to_esp(distance2, 2);         // Send to ESP8266
+        __delay_ms(500); // Delay for stability
+    }
+}
+
