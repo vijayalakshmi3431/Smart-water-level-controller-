@@ -1,0 +1,122 @@
+
+ ARDUINO CODE
+
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <Firebase_ESP_Client.h>
+#include <ArduinoJson.h>  // For parsing JSON data
+#include <addons/TokenHelper.h>
+#include <addons/RTDBHelper.h>
+
+
+/* 1. Define the WiFi credentials */
+#define WIFI_SS "realme 5s"
+#define WIFI_PASSWORD "nandhu24"
+
+
+/* 2. Define the API Key */
+#define API_KEY "AIzaSyA3yx-SUvLpLEbZNDqEXzlm_9xi9DuEI8c"
+
+
+/* 3. Define the RTDB URL */
+#define DATABASE_URL "https://smart-water-level-contro-4f1da-default-rtdb.firebaseio.com"
+
+
+/* 4. Define the user Email and password */
+#define USER_EMAIL "test@gmail.com"
+#define USER_PASSWORD "23456789"
+
+
+// Firebase objects
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+
+String tank1_level = "";
+String tank2_level = "";
+
+
+// Function to connect to Wi-Fi
+void connectWiFi() {
+    Serial.print("Connecting to Wi-Fi");
+    WiFi.begin(WIFI_SS, WIFI_PASSWORD);
+    while (WiFi.status() != WL_CONNECTED) {
+        Serial.print(".");
+        delay(300);
+    }
+    Serial.println();
+    Serial.print("Connected with IP: ");
+    Serial.println(WiFi.localIP());
+}
+
+
+// Function to initialize Firebase
+void initFirebase() {
+    config.api_key = API_KEY;
+    auth.user.email = USER_EMAIL;
+    auth.user.password = USER_PASSWORD;
+    config.database_url = DATABASE_URL;
+    config.token_status_callback = tokenStatusCallback;  // Optional for debugging
+    Firebase.begin(&config, &auth);
+    Firebase.reconnectWiFi(true);
+}
+
+
+// Function to receive data from UART
+void receiveDataFromPIC() {
+    if (Serial.available()) {
+        String receivedData = Serial.readStringUntil('\n');
+
+
+        // Parse the received data format from PIC
+        if (receivedData.startsWith("Tank 1:")) {
+            tank1_level = receivedData.substring(receivedData.indexOf(':') + 2);
+            Serial.println("Received Tank 1 level: " + tank1_level);
+        } else if (receivedData.startsWith("Tank 2:")) {
+            tank2_level = receivedData.substring(receivedData.indexOf(':') + 2);
+            Serial.println("Received Tank 2 level: " + tank2_level);
+        }
+    }
+}
+
+
+// Function to store data in Firebase
+void storeDataToFirebase() {
+    if (tank1_level.length() > 0) {
+        String path_tank1 = "tanks/tank1";
+        if (Firebase.RTDB.setString(&fbdo, path_tank1.c_str(), tank1_level)) {
+            Serial.println("Tank 1 level stored successfully in Firebase.");
+        } else {
+            Serial.println("Failed to store Tank 1 level: " + fbdo.errorReason());
+        }
+    }
+
+
+    if (tank2_level.length() > 0) {
+        String path_tank2 = "tanks/tank2";
+        if (Firebase.RTDB.setString(&fbdo, path_tank2.c_str(), tank2_level)) {
+            Serial.println("Tank 2 level stored successfully in Firebase.");
+        } else {
+            Serial.println("Failed to store Tank 2 level: " + fbdo.errorReason());
+        }
+    }
+}
+
+
+void setup() {
+    Serial.begin(9600);  // Set baud rate to communicate with PIC16F877A
+    connectWiFi();
+    initFirebase();
+}
+
+
+void loop() {
+    receiveDataFromPIC();  // Read data from PIC16F877A via UART
+    storeDataToFirebase(); // Store data in Firebase
+    delay(1000);  // Delay for stability
+}
+
+
+
+
